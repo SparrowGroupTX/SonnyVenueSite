@@ -1,0 +1,151 @@
+// Prisma schema for daily, single-space booking
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum BookingStatus {
+  HELD
+  CONFIRMED
+  CANCELLED
+  REFUNDED
+}
+
+enum DayStatus {
+  HELD
+  BOOKED
+}
+
+enum PaymentType {
+  DEPOSIT
+  REMAINDER
+}
+
+enum PaymentStatus {
+  requires_payment_method
+  processing
+  succeeded
+  canceled
+  requires_action
+  failed
+}
+
+enum DepositType {
+  FIXED
+  PERCENT
+}
+
+model Customer {
+  id               String    @id @default(cuid())
+  email            String    @unique
+  name             String?
+  phone            String?
+  stripeCustomerId String?   @unique
+  bookings         Booking[]
+  createdAt        DateTime  @default(now())
+}
+
+model Booking {
+  id                  String         @id @default(cuid())
+  customerId          String
+  customer            Customer       @relation(fields: [customerId], references: [id])
+  startDate           DateTime       @db.Date
+  endDateExclusive    DateTime       @db.Date
+  status              BookingStatus  @default(HELD)
+  currency            String         @default("usd")
+  depositAmount       Int            // minor units
+  totalAmount         Int            // minor units
+  pricingSnapshot     Json
+  stripeCustomerId    String?
+  payments            Payment[]
+  refunds             Refund[]
+  days                BookedDay[]
+  notifications       Notification[]
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  @@index([startDate])
+  @@index([status])
+}
+
+model BookedDay {
+  id           String     @id @default(cuid())
+  bookingId    String
+  booking      Booking    @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  day          DateTime   @db.Date
+  status       DayStatus
+  holdExpiresAt DateTime?
+  createdAt    DateTime   @default(now())
+
+  @@unique([day])
+  @@index([holdExpiresAt])
+}
+
+model Payment {
+  id                    String         @id @default(cuid())
+  bookingId             String
+  booking               Booking        @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  stripePaymentIntentId String         @unique
+  amount                Int
+  currency              String
+  type                  PaymentType
+  status                PaymentStatus
+  createdAt             DateTime       @default(now())
+}
+
+model Refund {
+  id               String   @id @default(cuid())
+  bookingId        String
+  booking          Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  stripeRefundId   String   @unique
+  amount           Int
+  currency         String
+  reason           String?
+  createdAt        DateTime @default(now())
+}
+
+model Blackout {
+  id        String   @id @default(cuid())
+  day       DateTime @unique @db.Date
+  reason    String?
+  createdAt DateTime @default(now())
+}
+
+model Notification {
+  id          String    @id @default(cuid())
+  bookingId   String?
+  booking     Booking?  @relation(fields: [bookingId], references: [id])
+  template    String
+  sendAt      DateTime
+  sentAt      DateTime?
+  providerId  String?
+  payload     Json?
+  createdAt   DateTime  @default(now())
+
+  @@index([sendAt])
+}
+
+model Policy {
+  id                     String      @id @default("default")
+  depositType            DepositType @default(FIXED)
+  depositValue           Int         // minor units or percent
+  remainderDaysBeforeStart Int       @default(14)
+  cancelCutoffHours      Int         @default(48)
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actor      String
+  action     String
+  entityType String
+  entityId   String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+}
+
+
