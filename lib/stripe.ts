@@ -1,3 +1,9 @@
+/**
+ * Stripe client initialization.
+ * 
+ * Returns a configured Stripe client instance with a fixed API version
+ * for consistency. Throws if the secret key is not configured.
+ */
 import Stripe from 'stripe';
 
 export function getStripe() {

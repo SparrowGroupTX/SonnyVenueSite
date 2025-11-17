@@ -1,3 +1,14 @@
+/**
+ * Background job worker.
+ * 
+ * Processes jobs from the BullMQ queue including:
+ * - hold-expire: Expires temporary holds that weren't paid
+ * - remainder-charge: Charges remainder balance before booking start
+ * - reminder-email: Sends booking reminder emails
+ * 
+ * This worker should run as a separate process (e.g., `npm run worker`)
+ * and must have access to the same Redis instance and database as the main app.
+ */
 import { Worker, Job } from 'bullmq';
 import IORedis from 'ioredis';
 import { logger } from '@/lib/logger';
@@ -11,6 +22,12 @@ type HoldExpireData = { bookingId: string };
 type ReminderEmailData = { bookingId: string; template: string };
 type RemainderChargeData = { bookingId: string };
 
+/**
+ * Handles hold expiration jobs.
+ * 
+ * Checks if a booking's hold has expired and cancels the booking
+ * if no active holds remain. This frees up dates for other customers.
+ */
 async function handleHoldExpire(job: Job<HoldExpireData>) {
   const { bookingId } = job.data;
   logger.info({ bookingId }, 'Hold expiration check');
@@ -26,6 +43,14 @@ async function handleHoldExpire(job: Job<HoldExpireData>) {
   });
 }
 
+/**
+ * Handles remainder charge jobs.
+ * 
+ * Charges the remainder balance (total - deposit) using the saved
+ * payment method. This happens automatically X days before the booking start.
+ * 
+ * Uses off_session payment to charge without customer interaction.
+ */
 async function handleRemainderCharge(job: Job<RemainderChargeData>) {
   const stripe = getStripe();
   const { bookingId } = job.data;
@@ -64,6 +89,12 @@ async function handleRemainderCharge(job: Job<RemainderChargeData>) {
   }
 }
 
+/**
+ * Handles reminder email jobs.
+ * 
+ * Sends reminder emails to customers before their booking starts.
+ * Typically scheduled at 14, 7, 2, and 1 day(s) before start date.
+ */
 async function handleReminderEmail(job: Job<ReminderEmailData>) {
   const { bookingId } = job.data;
   const booking = await prisma.booking.findUnique({ where: { id: bookingId }, include: { customer: true } });
@@ -74,6 +105,11 @@ async function handleReminderEmail(job: Job<ReminderEmailData>) {
   await prisma.notification.create({ data: { bookingId: booking.id, template: 'reminder', sendAt: new Date(), sentAt: new Date() } });
 }
 
+/**
+ * Main worker instance.
+ * 
+ * Listens for jobs on the 'jobs' queue and routes them to appropriate handlers.
+ */
 const worker = new Worker('jobs', async (job) => {
   switch (job.name) {
     case 'hold-expire':

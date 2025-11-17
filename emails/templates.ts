@@ -1,3 +1,10 @@
+/**
+ * Email template functions.
+ * 
+ * Provides HTML email templates for various booking-related notifications.
+ * These templates are simple HTML strings - consider using a templating library
+ * (like React Email) for more complex designs in production.
+ */
 export function bookingConfirmedTemplate(params: { bookingId: string; startDate: string; endDateExclusive: string; manageUrl: string }) {
   const subject = `Booking confirmed #${params.bookingId}`;
   const html = `<p>Your booking is confirmed for ${params.startDate} to ${params.endDateExclusive}.</p>

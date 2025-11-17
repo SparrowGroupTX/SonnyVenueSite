@@ -1,3 +1,9 @@
+/**
+ * Root layout component.
+ * 
+ * Provides the base HTML structure, metadata, and shared layout elements
+ * (header, footer) for all pages.
+ */
 import './globals.css';
 import React from 'react';
 

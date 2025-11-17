@@ -1,3 +1,8 @@
+/**
+ * Homepage component.
+ * 
+ * Landing page with basic information and link to availability calendar.
+ */
 export default function HomePage() {
   return (
     <div>

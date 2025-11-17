@@ -1,3 +1,9 @@
+/**
+ * Admin refund processing endpoint.
+ * 
+ * Allows admins to manually process refunds for bookings.
+ * Creates audit log entries for all refund actions.
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/db';
@@ -5,6 +11,22 @@ import { getStripe } from '@/lib/stripe';
 
 const BodySchema = z.object({ bookingId: z.string(), amountCents: z.number().int().positive() });
 
+/**
+ * POST /api/admin/refunds
+ * 
+ * Processes a manual refund for a booking.
+ * 
+ * Request body: { bookingId: string, amountCents: number }
+ * 
+ * Process:
+ * 1. Finds the most recent successful payment
+ * 2. Creates Stripe refund for specified amount
+ * 3. Records refund in database
+ * 4. Creates audit log entry
+ * 
+ * Note: Refunds are processed against the most recent payment.
+ * For partial refunds, ensure the amount doesn't exceed the payment amount.
+ */
 export async function POST(req: NextRequest) {
   let body: any = null;
   const ct = req.headers.get('content-type') || '';

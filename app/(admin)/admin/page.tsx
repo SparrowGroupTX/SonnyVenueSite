@@ -1,3 +1,13 @@
+/**
+ * Admin dashboard page.
+ * 
+ * Server-side component that displays:
+ * - List of all bookings with status and customer info
+ * - List of blackout dates
+ * - Forms to create blackouts and process refunds
+ * 
+ * Note: In production, this should be protected with authentication/authorization.
+ */
 import { prisma } from '@/lib/db';
 import Link from 'next/link';
 

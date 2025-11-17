@@ -1,8 +1,25 @@
+/**
+ * Availability API endpoint.
+ * 
+ * GET: Returns unavailable dates for a given month (booked days, active holds, blackouts)
+ * POST: Validates if a date range is available for booking
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { MonthQuerySchema, RangeSchema } from '@/lib/validation';
 import { monthBounds } from '@/lib/time';
 
+/**
+ * GET /api/availability?year=YYYY&month=M
+ * 
+ * Returns unavailable dates for the specified month.
+ * Includes:
+ * - Confirmed bookings (BOOKED status)
+ * - Active holds (HELD status with unexpired holdExpiresAt)
+ * - Blackout dates
+ * 
+ * Expired holds are automatically excluded.
+ */
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const parsed = MonthQuerySchema.safeParse({
@@ -43,6 +60,22 @@ export async function GET(req: NextRequest) {
   });
 }
 
+/**
+ * POST /api/availability
+ * 
+ * Validates if a date range is available for booking.
+ * 
+ * Request body: { startDate: "YYYY-MM-DD", endDateExclusive: "YYYY-MM-DD" }
+ * 
+ * Returns:
+ * - { ok: true } if range is available
+ * - { ok: false, conflicts: [...] } if conflicts exist
+ * 
+ * Checks for:
+ * - Confirmed bookings
+ * - Active (unexpired) holds
+ * - Blackout dates
+ */
 export async function POST(req: NextRequest) {
   // Validate a requested range is free (ignoring expired holds)
   const body = await req.json().catch(() => null);

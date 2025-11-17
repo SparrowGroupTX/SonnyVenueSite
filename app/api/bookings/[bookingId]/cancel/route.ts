@@ -1,3 +1,9 @@
+/**
+ * Booking cancellation endpoint.
+ * 
+ * Allows customers to cancel confirmed bookings within the cancellation window.
+ * Processes refunds according to policy (deposit is non-refundable, remainder is refundable).
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getStripe } from '@/lib/stripe';
@@ -6,6 +12,25 @@ import { DateTime } from 'luxon';
 import { venueZone } from '@/lib/time';
 import { sendCancellation, sendRefund } from '@/lib/emails';
 
+/**
+ * POST /api/bookings/[bookingId]/cancel
+ * 
+ * Cancels a confirmed booking.
+ * 
+ * Requirements:
+ * - Booking must be in CONFIRMED status
+ * - Cancellation must be within cutoff window (default: 48 hours before start)
+ * 
+ * Process:
+ * 1. Validates cancellation window
+ * 2. Calculates refundable amount (paid - deposit; deposit is non-refundable)
+ * 3. Refunds remainder payments if applicable
+ * 4. Deletes booked days to free up dates
+ * 5. Updates booking status to CANCELLED
+ * 6. Sends cancellation and refund emails
+ * 
+ * Returns: { ok: true, refunded: number } - Amount refunded in cents
+ */
 export async function POST(_req: NextRequest, { params }: { params: { bookingId: string } }) {
   const { bookingId } = params;
   const booking = await prisma.booking.findUnique({ where: { id: bookingId }, include: { customer: true, payments: true, days: true } });

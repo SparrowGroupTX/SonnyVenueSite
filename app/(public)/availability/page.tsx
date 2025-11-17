@@ -1,3 +1,9 @@
+/**
+ * Availability calendar page.
+ * 
+ * Client-side component that displays a calendar view of available dates
+ * and allows customers to create temporary holds on date ranges.
+ */
 "use client";
 import React, { useEffect, useMemo, useState } from 'react';
 
@@ -17,6 +23,7 @@ export default function AvailabilityPage() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
+  // Fetch unavailable dates when month/year changes
   useEffect(() => {
     fetch(`/api/availability?year=${year}&month=${month}`)
       .then(r => r.json())
@@ -25,6 +32,12 @@ export default function AvailabilityPage() {
 
   const daysInMonth = useMemo(() => new Date(year, month, 0).getDate(), [year, month]);
 
+  /**
+   * Creates a temporary hold on the selected date range.
+   * 
+   * On success, displays the booking ID for reference.
+   * Customer can then proceed to payment via the booking management page.
+   */
   async function holdDates(e: React.FormEvent) {
     e.preventDefault();
     setError(null); setMessage(null);

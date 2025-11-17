@@ -1,3 +1,16 @@
+/**
+ * Stripe webhook handler.
+ * 
+ * Processes Stripe webhook events for payment confirmations and failures.
+ * This is the primary mechanism for updating booking status after payments.
+ * 
+ * Handles:
+ * - checkout.session.completed: Confirms booking and schedules remainder charge/reminders
+ * - payment_intent.succeeded: Records successful payments
+ * - payment_intent.payment_failed: Records failures and retries remainder charge
+ * 
+ * Webhook signature verification ensures requests are from Stripe.
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { getStripe } from '@/lib/stripe';
 import { prisma } from '@/lib/db';
@@ -9,6 +22,29 @@ import { venueZone } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
 
+/**
+ * POST /api/stripe/webhook
+ * 
+ * Processes Stripe webhook events.
+ * 
+ * Verifies webhook signature before processing to ensure authenticity.
+ * 
+ * Event handlers:
+ * 
+ * checkout.session.completed:
+ * - Creates payment record
+ * - Confirms booking (HELD -> CONFIRMED)
+ * - Converts held days to booked days
+ * - Schedules remainder charge job (X days before start)
+ * - Schedules reminder emails (14, 7, 2, 1 days before)
+ * 
+ * payment_intent.succeeded:
+ * - Records successful payment (idempotent via upsert)
+ * 
+ * payment_intent.payment_failed:
+ * - Records failed payment
+ * - Retries remainder charge with exponential backoff (up to 3 attempts)
+ */
 export async function POST(req: NextRequest) {
   const stripe = getStripe();
   const sig = req.headers.get('stripe-signature');

@@ -1,14 +1,34 @@
+/**
+ * Admin blackout management endpoint.
+ * 
+ * Allows admins to mark dates as unavailable (blackouts).
+ * Blackouts prevent any bookings on those dates.
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { z } from 'zod';
 
 const CreateSchema = z.object({ day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), reason: z.string().optional() });
 
+/**
+ * GET /api/admin/blackouts
+ * 
+ * Returns list of all blackout dates.
+ */
 export async function GET() {
   const list = await prisma.blackout.findMany({ orderBy: { day: 'asc' } });
   return NextResponse.json(list.map(b => ({ day: b.day.toISOString().slice(0,10), reason: b.reason })));
 }
 
+/**
+ * POST /api/admin/blackouts
+ * 
+ * Creates a new blackout date.
+ * 
+ * Request body: { day: "YYYY-MM-DD", reason?: string }
+ * 
+ * Creates audit log entry for admin tracking.
+ */
 export async function POST(req: NextRequest) {
   let body: any = null;
   const ct = req.headers.get('content-type') || '';
@@ -31,6 +51,15 @@ export async function POST(req: NextRequest) {
   }
 }
 
+/**
+ * DELETE /api/admin/blackouts?day=YYYY-MM-DD
+ * 
+ * Removes a blackout date.
+ * 
+ * Query params: day (YYYY-MM-DD format)
+ * 
+ * Creates audit log entry for admin tracking.
+ */
 export async function DELETE(req: NextRequest) {
   const url = new URL(req.url);
   const day = url.searchParams.get('day');

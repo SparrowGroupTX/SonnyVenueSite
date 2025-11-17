@@ -1,4 +1,15 @@
-// Prisma schema for daily, single-space booking
+/**
+ * Prisma schema for daily, single-space venue booking system.
+ * 
+ * This schema models a venue booking system where customers can reserve
+ * dates by the day. The system supports:
+ * - Temporary holds with expiration
+ * - Deposit and remainder payments
+ * - Booking cancellations and refunds
+ * - Blackout dates (admin-defined unavailable dates)
+ * - Email notifications
+ * - Audit logging
+ */
 
 generator client {
   provider = "prisma-client-js"
@@ -9,6 +20,13 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/**
+ * Booking status lifecycle:
+ * - HELD: Temporary hold created, awaiting deposit payment
+ * - CONFIRMED: Deposit paid, booking is active
+ * - CANCELLED: Booking cancelled (by customer or expired hold)
+ * - REFUNDED: Booking refunded (typically after cancellation)
+ */
 enum BookingStatus {
   HELD
   CONFIRMED
@@ -16,16 +34,30 @@ enum BookingStatus {
   REFUNDED
 }
 
+/**
+ * Day status for individual booked days:
+ * - HELD: Temporarily reserved (expires if not paid)
+ * - BOOKED: Confirmed reservation
+ */
 enum DayStatus {
   HELD
   BOOKED
 }
 
+/**
+ * Payment types:
+ * - DEPOSIT: Initial deposit payment
+ * - REMAINDER: Balance payment charged before booking start
+ */
 enum PaymentType {
   DEPOSIT
   REMAINDER
 }
 
+/**
+ * Stripe payment intent status values.
+ * Maps directly to Stripe's PaymentIntent status.
+ */
 enum PaymentStatus {
   requires_payment_method
   processing
@@ -35,116 +67,200 @@ enum PaymentStatus {
   failed
 }
 
+/**
+ * Deposit calculation type:
+ * - FIXED: Fixed amount in cents
+ * - PERCENT: Percentage of total booking amount
+ */
 enum DepositType {
   FIXED
   PERCENT
 }
 
+/**
+ * Customer information.
+ * 
+ * Stores customer contact details and links to Stripe customer record
+ * for payment processing.
+ */
 model Customer {
   id               String    @id @default(cuid())
   email            String    @unique
   name             String?
   phone            String?
-  stripeCustomerId String?   @unique
+  stripeCustomerId String?   @unique // Stripe customer ID for payment processing
   bookings         Booking[]
   createdAt        DateTime  @default(now())
 }
 
+/**
+ * Main booking record.
+ * 
+ * Represents a customer's reservation request or confirmed booking.
+ * 
+ * Key fields:
+ * - startDate: First day of booking (inclusive)
+ * - endDateExclusive: Day after last day (exclusive, so range is [startDate, endDateExclusive))
+ * - status: Current booking status (HELD, CONFIRMED, etc.)
+ * - depositAmount/totalAmount: Amounts in cents (minor currency units)
+ * - pricingSnapshot: JSON snapshot of pricing at time of booking (for audit)
+ * - stripeCustomerId: Stripe customer ID (may differ from Customer.stripeCustomerId)
+ */
 model Booking {
   id                  String         @id @default(cuid())
   customerId          String
   customer            Customer       @relation(fields: [customerId], references: [id])
-  startDate           DateTime       @db.Date
-  endDateExclusive    DateTime       @db.Date
+  startDate           DateTime       @db.Date // First day (inclusive)
+  endDateExclusive    DateTime       @db.Date // Day after last day (exclusive)
   status              BookingStatus  @default(HELD)
   currency            String         @default("usd")
-  depositAmount       Int            // minor units
-  totalAmount         Int            // minor units
-  pricingSnapshot     Json
-  stripeCustomerId    String?
+  depositAmount       Int            // minor units (cents)
+  totalAmount         Int            // minor units (cents)
+  pricingSnapshot     Json           // Snapshot of pricing at booking time
+  stripeCustomerId    String?        // Stripe customer ID for this booking
   payments            Payment[]
   refunds             Refund[]
-  days                BookedDay[]
+  days                BookedDay[]     // Individual days reserved
   notifications       Notification[]
   createdAt           DateTime       @default(now())
   updatedAt           DateTime       @updatedAt
 
-  @@index([startDate])
-  @@index([status])
+  @@index([startDate])  // Index for date range queries
+  @@index([status])     // Index for status filtering
 }
 
+/**
+ * Individual booked day records.
+ * 
+ * Each day in a booking range gets its own record. This prevents
+ * double-booking by enforcing uniqueness on the day field.
+ * 
+ * Key fields:
+ * - day: The specific date (date-only, no time)
+ * - status: HELD (temporary) or BOOKED (confirmed)
+ * - holdExpiresAt: Expiration time for holds (null for BOOKED days)
+ * 
+ * The unique constraint on 'day' ensures no double-booking.
+ */
 model BookedDay {
   id           String     @id @default(cuid())
   bookingId    String
   booking      Booking    @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  day          DateTime   @db.Date
+  day          DateTime   @db.Date // Date-only value (no time component)
   status       DayStatus
-  holdExpiresAt DateTime?
+  holdExpiresAt DateTime? // When hold expires (null for BOOKED days)
   createdAt    DateTime   @default(now())
 
-  @@unique([day])
-  @@index([holdExpiresAt])
+  @@unique([day])              // Prevents double-booking
+  @@index([holdExpiresAt])     // Index for finding expired holds
 }
 
+/**
+ * Payment records.
+ * 
+ * Tracks all Stripe payments (deposits and remainder charges).
+ * Each payment is linked to a Stripe PaymentIntent via stripePaymentIntentId.
+ * 
+ * The unique constraint on stripePaymentIntentId ensures idempotency
+ * when processing webhook events.
+ */
 model Payment {
   id                    String         @id @default(cuid())
   bookingId             String
   booking               Booking        @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  stripePaymentIntentId String         @unique
-  amount                Int
+  stripePaymentIntentId String         @unique // Stripe PaymentIntent ID (for idempotency)
+  amount                Int            // Amount in cents
   currency              String
-  type                  PaymentType
-  status                PaymentStatus
+  type                  PaymentType     // DEPOSIT or REMAINDER
+  status                PaymentStatus  // Stripe payment status
   createdAt             DateTime       @default(now())
 }
 
+/**
+ * Refund records.
+ * 
+ * Tracks refunds processed through Stripe.
+ * Linked to Stripe refund via stripeRefundId.
+ */
 model Refund {
   id               String   @id @default(cuid())
   bookingId        String
   booking          Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  stripeRefundId   String   @unique
-  amount           Int
+  stripeRefundId   String   @unique // Stripe refund ID
+  amount           Int      // Amount refunded in cents
   currency         String
-  reason           String?
+  reason           String?  // Reason for refund (e.g., 'requested_by_customer', 'admin')
   createdAt        DateTime @default(now())
 }
 
+/**
+ * Blackout dates.
+ * 
+ * Admin-defined dates that are unavailable for booking.
+ * Used to mark dates as unavailable (e.g., maintenance, holidays).
+ * 
+ * The unique constraint on 'day' ensures each date can only be blacked out once.
+ */
 model Blackout {
   id        String   @id @default(cuid())
-  day       DateTime @unique @db.Date
-  reason    String?
+  day       DateTime @unique @db.Date // Date-only value
+  reason    String?  // Optional reason for blackout
   createdAt DateTime @default(now())
 }
 
+/**
+ * Email notification tracking.
+ * 
+ * Records scheduled and sent email notifications.
+ * Used for tracking reminder emails and other notifications.
+ */
 model Notification {
   id          String    @id @default(cuid())
   bookingId   String?
   booking     Booking?  @relation(fields: [bookingId], references: [id])
-  template    String
-  sendAt      DateTime
-  sentAt      DateTime?
-  providerId  String?
-  payload     Json?
+  template    String    // Email template name
+  sendAt      DateTime  // Scheduled send time
+  sentAt      DateTime? // Actual send time (null if not yet sent)
+  providerId  String?   // Email provider message ID
+  payload     Json?     // Additional notification data
   createdAt   DateTime  @default(now())
 
-  @@index([sendAt])
+  @@index([sendAt]) // Index for finding scheduled notifications
 }
 
+/**
+ * Booking policy configuration.
+ * 
+ * Stores configurable booking policies (deposit type, cancellation window, etc.).
+ * Uses a single record with id='default' for simplicity.
+ * 
+ * Fields:
+ * - depositType: FIXED (cents) or PERCENT (percentage)
+ * - depositValue: Deposit amount (cents if FIXED, percentage if PERCENT)
+ * - remainderDaysBeforeStart: Days before booking start to charge remainder
+ * - cancelCutoffHours: Hours before start when cancellation window closes
+ */
 model Policy {
   id                     String      @id @default("default")
   depositType            DepositType @default(FIXED)
-  depositValue           Int         // minor units or percent
-  remainderDaysBeforeStart Int       @default(14)
-  cancelCutoffHours      Int         @default(48)
+  depositValue           Int         // minor units (cents) or percent
+  remainderDaysBeforeStart Int       @default(14) // Days before start to charge remainder
+  cancelCutoffHours      Int         @default(48) // Hours before start when cancellation closes
 }
 
+/**
+ * Audit log for admin actions.
+ * 
+ * Tracks all admin actions (blackout creation/deletion, refunds, etc.)
+ * for compliance and debugging purposes.
+ */
 model AuditLog {
   id         String   @id @default(cuid())
-  actor      String
-  action     String
-  entityType String
-  entityId   String
-  metadata   Json?
+  actor      String   // Who performed the action (e.g., 'admin')
+  action     String   // Action type (e.g., 'CREATE_BLACKOUT', 'ADMIN_REFUND')
+  entityType String   // Type of entity affected (e.g., 'Blackout', 'Booking')
+  entityId   String   // ID of affected entity
+  metadata   Json?    // Additional action details
   createdAt  DateTime @default(now())
 }
 

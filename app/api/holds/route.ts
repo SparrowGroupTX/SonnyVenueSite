@@ -1,3 +1,11 @@
+/**
+ * Hold creation API endpoint.
+ * 
+ * Creates a temporary hold on dates for a customer, reserving them
+ * for a limited time (default 15 minutes) before payment is required.
+ * 
+ * This prevents double-booking while customers complete checkout.
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/db';
@@ -11,6 +19,31 @@ const HoldRequestSchema = RangeSchema.extend({
   customer: z.object({ email: z.string().email(), name: z.string().optional(), phone: z.string().optional() }),
 });
 
+/**
+ * POST /api/holds
+ * 
+ * Creates a temporary hold on the specified date range.
+ * 
+ * Request body:
+ * {
+ *   startDate: "YYYY-MM-DD",
+ *   endDateExclusive: "YYYY-MM-DD",
+ *   customer: { email: string, name?: string, phone?: string }
+ * }
+ * 
+ * Process:
+ * 1. Validates date range is available (no conflicts, no blackouts)
+ * 2. Clears any expired holds
+ * 3. Calculates pricing and deposit
+ * 4. Creates/updates customer record
+ * 5. Creates booking with HELD status
+ * 6. Reserves all days in range as HELD
+ * 7. Schedules hold expiration job
+ * 
+ * Returns:
+ * - { ok: true, bookingId: string, holdExpiresAt: Date } on success
+ * - { ok: false, error: string } on failure (409 Conflict if dates unavailable)
+ */
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
   const parsed = HoldRequestSchema.safeParse(body);

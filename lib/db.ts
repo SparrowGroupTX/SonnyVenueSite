@@ -1,3 +1,11 @@
+/**
+ * Database client singleton for Prisma.
+ * 
+ * Uses a global instance in development to prevent multiple PrismaClient instances
+ * during hot reloading, which can cause connection pool exhaustion.
+ * 
+ * In production, creates a new instance per serverless function invocation.
+ */
 import { PrismaClient } from '@prisma/client';
 
 declare global {
